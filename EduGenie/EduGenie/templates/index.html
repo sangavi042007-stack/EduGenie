@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ app_name }} — AI Learning Assistant</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}">
+</head>
+<body>
+  <main class="container">
+    <header class="hero">
+      <p class="eyebrow">GENERATIVE AI • LEARNING</p>
+      <h1>EduGenie</h1>
+      <p>Ask questions, simplify concepts, summarize study material, generate quizzes, and build a learning path.</p>
+    </header>
+
+    <section class="card">
+      <form id="edu-form">
+        <label for="task">Choose a task</label>
+        <select id="task" name="task">
+          <option value="qa">Ask a Question</option>
+          <option value="explain">Explain a Concept</option>
+          <option value="quiz">Generate Quiz</option>
+          <option value="summarize">Summarize Text</option>
+          <option value="learn">Learning Path</option>
+        </select>
+
+        <label for="input">Your input</label>
+        <textarea id="input" rows="9" placeholder="Example: Explain the Pythagorean theorem simply."></textarea>
+
+        <div id="quiz-options" class="quiz-settings hidden">
+          <label for="question-count">Number of questions</label>
+          <input id="question-count" type="number" min="1" max="10" value="3">
+        </div>
+
+        <button id="submit-btn" type="submit">Generate</button>
+      </form>
+    </section>
+
+    <section id="status" class="status" aria-live="polite"></section>
+    <section id="result" class="result card hidden"></section>
+  </main>
+
+  <script>
+    const form = document.getElementById("edu-form");
+    const task = document.getElementById("task");
+    const input = document.getElementById("input");
+    const result = document.getElementById("result");
+    const status = document.getElementById("status");
+    const submitBtn = document.getElementById("submit-btn");
+    const quizOptions = document.getElementById("quiz-options");
+
+    task.addEventListener("change", () => {
+      quizOptions.classList.toggle("hidden", task.value !== "quiz");
+      const placeholders = {
+        qa: "Example: Which is the largest ocean?",
+        explain: "Example: Explain photosynthesis to a beginner.",
+        quiz: "Paste a passage or enter a topic for the quiz.",
+        summarize: "Paste the educational passage you want to summarize.",
+        learn: "Example: SQL"
+      };
+      input.placeholder = placeholders[task.value];
+    });
+
+    function escapeHtml(value) {
+      return value.replace(/[&<>"']/g, char => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+      }[char]));
+    }
+
+    function renderText(text) {
+      return `<div class="answer">${escapeHtml(text).replace(/\n/g, "<br>")}</div>`;
+    }
+
+    function renderQuiz(quiz) {
+      return `
+        <div class="quiz">
+          ${quiz.questions.map((q, i) => `
+            <fieldset class="question" data-answer="${escapeHtml(q.correct_answer)}">
+              <legend>${i + 1}. ${escapeHtml(q.question)}</legend>
+              ${q.options.map(option => `
+                <label class="option">
+                  <input type="radio" name="q${i}" value="${escapeHtml(option)}">
+                  <span>${escapeHtml(option)}</span>
+                </label>
+              `).join("")}
+              <div class="feedback" id="feedback-${i}"></div>
+            </fieldset>
+          `).join("")}
+          <button type="button" id="check-quiz">Check Answers</button>
+        </div>`;
+    }
+
+    async function callApi() {
+      const value = input.value.trim();
+      if (!value) {
+        status.textContent = "Please enter some text.";
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Generating…";
+      status.textContent = "EduGenie is thinking…";
+      result.classList.add("hidden");
+      result.innerHTML = "";
+
+      const endpoint = task.value === "learn"
+        ? "/learn/recommendations"
+        : `/${task.value}`;
+
+      const body = task.value === "quiz"
+        ? { text: value, question_count: Number(document.getElementById("question-count").value) }
+        : { text: value };
+
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(body)
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          const detail = data.detail || "Request failed.";
+          throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
+        }
+
+        result.innerHTML = task.value === "quiz"
+          ? renderQuiz(data.result)
+          : renderText(data.result);
+        result.classList.remove("hidden");
+        status.textContent = "Completed.";
+        bindQuizChecker();
+      } catch (error) {
+        status.textContent = `Error: ${error.message}`;
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Generate";
+      }
+    }
+
+    function bindQuizChecker() {
+      const button = document.getElementById("check-quiz");
+      if (!button) return;
+      button.addEventListener("click", () => {
+        let score = 0;
+        document.querySelectorAll(".question").forEach((question, i) => {
+          const selected = question.querySelector(`input[name="q${i}"]:checked`);
+          const feedback = document.getElementById(`feedback-${i}`);
+          const answer = question.dataset.answer;
+          if (!selected) {
+            feedback.textContent = "Choose an answer.";
+            return;
+          }
+          if (selected.value === answer) {
+            score++;
+            feedback.textContent = "✓ Correct";
+          } else {
+            feedback.textContent = `✗ Correct answer: ${answer}`;
+          }
+        });
+        status.textContent = `Quiz score: ${score} / ${document.querySelectorAll(".question").length}`;
+      });
+    }
+
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      callApi();
+    });
+  </script>
+</body>
+</html>
